@@ -88,6 +88,24 @@ export function ServiceDeskApp({ initialTickets, categories, viewer, csrfToken }
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
+  const refreshTicket = async (ticket: Ticket, notifyOnError = false) => {
+    const response = await fetch(`/api/tickets/${ticket.recordId}`, { cache: "no-store" });
+    if (!response.ok) {
+      if (notifyOnError) setToast("Не удалось обновить карточку заявки.");
+      return null;
+    }
+    const payload = (await response.json()) as { ticket: TicketRecord };
+    const updated = toUiTicket(payload.ticket);
+    setTickets((current) => current.map((item) => item.recordId === ticket.recordId ? updated : item));
+    setSelectedTicket((current) => current?.recordId === ticket.recordId ? updated : current);
+    return updated;
+  };
+
+  const openTicket = (ticket: Ticket) => {
+    setSelectedTicket(ticket);
+    void refreshTicket(ticket, true);
+  };
+
   const handleCreateTicket = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -125,6 +143,7 @@ export function ServiceDeskApp({ initialTickets, categories, viewer, csrfToken }
     setTickets((current) => current.map((item) => item.id === ticket.id ? updated : item));
     setSelectedTicket(updated);
     setToast(`Заявка ${ticket.id} назначена вам`);
+    await refreshTicket(updated);
   };
 
   const transitionTicket = async (ticket: Ticket, status: "in_progress" | "waiting_for_user" | "resolved" | "closed") => {
@@ -142,6 +161,7 @@ export function ServiceDeskApp({ initialTickets, categories, viewer, csrfToken }
     setTickets((current) => current.map((item) => item.recordId === ticket.recordId ? updated : item));
     setSelectedTicket(updated);
     setToast(`Статус ${ticket.id} обновлён`);
+    await refreshTicket(updated);
   };
 
   const viewTitle = view === "overview"
@@ -192,8 +212,8 @@ export function ServiceDeskApp({ initialTickets, categories, viewer, csrfToken }
         </header>
 
         <div className="page-content">
-          {view === "overview" && <Overview role={role} tickets={scopedTickets} onCreate={() => setCreateOpen(true)} onOpenTicket={setSelectedTicket} onShowTickets={() => setView("tickets")} />}
-          {view === "tickets" && <TicketsView role={role} tickets={filteredTickets} categories={categories} total={scopedTickets.length} search={search} statusFilter={statusFilter} categoryFilter={categoryFilter} onSearch={setSearch} onStatus={setStatusFilter} onCategory={setCategoryFilter} onOpen={setSelectedTicket} onCreate={() => setCreateOpen(true)} onReset={() => { setSearch(""); setStatusFilter("Все статусы"); setCategoryFilter("Все категории"); }} />}
+          {view === "overview" && <Overview role={role} tickets={scopedTickets} onCreate={() => setCreateOpen(true)} onOpenTicket={openTicket} onShowTickets={() => setView("tickets")} />}
+          {view === "tickets" && <TicketsView role={role} tickets={filteredTickets} categories={categories} total={scopedTickets.length} search={search} statusFilter={statusFilter} categoryFilter={categoryFilter} onSearch={setSearch} onStatus={setStatusFilter} onCategory={setCategoryFilter} onOpen={openTicket} onCreate={() => setCreateOpen(true)} onReset={() => { setSearch(""); setStatusFilter("Все статусы"); setCategoryFilter("Все категории"); }} />}
           {view === "users" && <UsersView csrfToken={csrfToken} />}
           {view === "settings" && <SettingsView csrfToken={csrfToken} />}
           {view === "audit" && <AuditView />}
@@ -204,6 +224,7 @@ export function ServiceDeskApp({ initialTickets, categories, viewer, csrfToken }
       {selectedTicket && <TicketDrawer closeButtonRef={closeButtonRef} role={role} ticket={selectedTicket} onClose={() => setSelectedTicket(null)} onTake={() => takeTicket(selectedTicket)} onTransition={(status) => transitionTicket(selectedTicket, status)} onComment={async (body, visibility) => {
         const response = await fetch(`/api/tickets/${selectedTicket.recordId}/comments`, { method: "POST", headers: { "content-type": "application/json", "x-csrf-token": csrfToken }, body: JSON.stringify({ body, visibility }) });
         setToast(response.ok ? "Комментарий добавлен" : "Не удалось добавить комментарий");
+        if (response.ok) await refreshTicket(selectedTicket);
         return response.ok;
       }} />}
       <div className={toast ? "toast visible" : "toast"} role="status" aria-live="polite"><span aria-hidden="true">✓</span>{toast}</div>

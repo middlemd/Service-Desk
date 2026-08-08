@@ -108,3 +108,19 @@ test("demo mode не обращается к защищённым API и вык�
   assert.match(demoMode, /nodeEnv === "development"/);
   assert.match(demoMode, /demoMode === "true"/);
 });
+
+test("карточка использует защищённую историю, безопасный исполнитель и закрывает форму комментария", () => {
+  const dal = readFileSync(join(root, "lib", "dal.ts"), "utf8");
+  const data = readFileSync(join(root, "app", "prototype-data.ts"), "utf8");
+  const drawer = readFileSync(join(root, "app", "prototype-components.tsx"), "utf8");
+  const config = readFileSync(join(root, "next.config.ts"), "utf8");
+
+  assert.match(dal, /ticket_events\(id,actor_id,action,occurred_at/);
+  assert.match(dal, /comments\(id,author_id,body,visibility,created_at/);
+  assert.match(data, /ticket\.assignee_id \? "Назначен специалисту" : "Не назначен"/);
+  assert.match(drawer, /ticket\.history/);
+  assert.match(drawer, /commentsClosed/);
+  assert.doesNotMatch(drawer, /Сегодня, 09:28/);
+  assert.match(config, /source: "\/favicon\.ico"/);
+  assert.match(config, /source: "\/favicon\.png"/);
+});

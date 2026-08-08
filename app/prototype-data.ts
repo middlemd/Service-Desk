@@ -5,6 +5,15 @@ export type View = "overview" | "tickets" | "users" | "settings" | "audit";
 export type TicketStatus = "Новая" | "В работе" | "Ждёт ответа" | "Решена" | "Закрыта" | "Отменена";
 export type Priority = "Низкий" | "Средний" | "Высокий" | "Критический";
 
+export type TicketHistoryItem = {
+  id: string;
+  title: string;
+  actor: string;
+  occurredAt: string;
+  body?: string;
+  isInternal?: boolean;
+};
+
 export type Ticket = {
   recordId: string;
   id: string;
@@ -19,6 +28,7 @@ export type Ticket = {
   due: string;
   risk: boolean;
   created: string;
+  history?: TicketHistoryItem[];
 };
 
 export type CategoryOption = { id: string; name: string; isActive: boolean };
@@ -66,10 +76,82 @@ const priorityLabels: Record<ApiPriority, Priority> = {
   low: "Низкий", medium: "Средний", high: "Высокий", critical: "Критический",
 };
 
+const eventLabels: Record<string, string> = {
+  "ticket.created": "Заявка создана",
+  "ticket.updated": "Данные заявки обновлены",
+  "ticket.claimed": "Заявка взята в работу",
+  "ticket.status.in_progress": "Статус изменён на «В работе»",
+  "ticket.status.waiting_for_user": "Статус изменён на «Ждёт ответа»",
+  "ticket.status.resolved": "Статус изменён на «Решена»",
+  "ticket.status.closed": "Статус изменён на «Закрыта»",
+  "ticket.status.cancelled": "Статус изменён на «Отменена»",
+};
+
+const dateFormatter = new Intl.DateTimeFormat("ru-RU", {
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "Europe/Moscow",
+});
+
+function formatDate(value: string) {
+  return dateFormatter.format(new Date(value));
+}
+
+function fallbackActor(actorId: string, ticket: TicketRecord, author: string, owner: string) {
+  if (actorId === ticket.author_id) return author;
+  if (actorId === ticket.assignee_id && owner !== "Назначен специалисту") return owner;
+  return "Специалист поддержки";
+}
+
+function buildHistory(ticket: TicketRecord, author: string, owner: string): TicketHistoryItem[] {
+  const events: Array<TicketHistoryItem & { timestamp: number }> = (ticket.ticket_events ?? [])
+    .filter((event) => !event.action.startsWith("comment."))
+    .map((event) => ({
+      id: `event-${event.id}`,
+      title: eventLabels[event.action] ?? "Заявка обновлена",
+      actor: event.actor?.display_name ?? fallbackActor(event.actor_id, ticket, author, owner),
+      occurredAt: formatDate(event.occurred_at),
+      timestamp: Date.parse(event.occurred_at),
+    }));
+  const comments: Array<TicketHistoryItem & { timestamp: number }> = (ticket.comments ?? []).map((comment) => ({
+    id: `comment-${comment.id}`,
+    title: comment.visibility === "internal" ? "Внутренний комментарий" : "Комментарий добавлен",
+    actor: comment.author?.display_name ?? fallbackActor(comment.author_id, ticket, author, owner),
+    occurredAt: formatDate(comment.created_at),
+    body: comment.body,
+    isInternal: comment.visibility === "internal",
+    timestamp: Date.parse(comment.created_at),
+  }));
+  const history = [...events, ...comments]
+    .sort((left, right) => right.timestamp - left.timestamp)
+    .map((entry) => {
+      const item: TicketHistoryItem = {
+        id: entry.id,
+        title: entry.title,
+        actor: entry.actor,
+        occurredAt: entry.occurredAt,
+      };
+      if (entry.body) item.body = entry.body;
+      if (entry.isInternal) item.isInternal = true;
+      return item;
+    });
+
+  return history.length ? history : [{
+    id: `created-${ticket.id}`,
+    title: "Заявка создана",
+    actor: author,
+    occurredAt: formatDate(ticket.created_at),
+  }];
+}
+
 export function toUiTicket(ticket: TicketRecord): Ticket {
   const resolutionDue = ticket.resolution_due_at ? new Date(ticket.resolution_due_at) : null;
   const remainingMinutes = resolutionDue ? Math.round((resolutionDue.getTime() - Date.now()) / 60000) : null;
   const isClosed = ["resolved", "closed", "cancelled"].includes(ticket.status);
+  const author = ticket.author?.display_name ?? "Пользователь";
+  const owner = ticket.assignee?.display_name ?? (ticket.assignee_id ? "Назначен специалисту" : "Не назначен");
   return {
     recordId: ticket.id,
     id: `SD-${ticket.number}`,
@@ -79,10 +161,11 @@ export function toUiTicket(ticket: TicketRecord): Ticket {
     categoryId: ticket.category_id,
     priority: priorityLabels[ticket.priority],
     status: statusLabels[ticket.status],
-    author: ticket.author?.display_name ?? "Пользователь",
-    owner: ticket.assignee?.display_name ?? "Не назначен",
+    author,
+    owner,
     due: isClosed ? "В срок" : remainingMinutes === null ? "Не рассчитан" : remainingMinutes <= 0 ? "Просрочено" : remainingMinutes < 60 ? `${remainingMinutes} мин` : `${Math.floor(remainingMinutes / 60)} ч ${remainingMinutes % 60} мин`,
     risk: !isClosed && remainingMinutes !== null && remainingMinutes <= 60,
-    created: new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(ticket.created_at)),
+    created: formatDate(ticket.created_at),
+    history: buildHistory(ticket, author, owner),
   };
 }

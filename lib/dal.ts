@@ -68,7 +68,7 @@ export async function getTicket(viewer: Viewer, id: string) {
   const supabase = createUserSupabaseClient(viewer.idToken);
   const { data, error } = await supabase
     .from("tickets")
-    .select(`${ticketColumns},comments(id,body,visibility,created_at,author:profiles!comments_author_id_fkey(display_name))`)
+    .select(`${ticketColumns},comments(id,author_id,body,visibility,created_at,author:profiles!comments_author_id_fkey(display_name)),ticket_events(id,actor_id,action,occurred_at,actor:profiles!ticket_events_actor_id_fkey(display_name))`)
     .eq("id", id)
     .maybeSingle();
   if (error) throw new AppError(500, "INTERNAL", "Ticket query failed");

@@ -2,6 +2,12 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  async redirects() {
+    return [
+      { source: "/favicon.ico", destination: "/favicon.svg", permanent: true },
+      { source: "/favicon.png", destination: "/favicon.svg", permanent: true },
+    ];
+  },
   async headers() {
     return [
       {

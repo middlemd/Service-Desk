@@ -20,6 +20,23 @@ export type Profile = {
   created_at: string;
 };
 
+export type TicketCommentRecord = {
+  id: string;
+  author_id: string;
+  body: string;
+  visibility: CommentVisibility;
+  created_at: string;
+  author?: { display_name: string } | null;
+};
+
+export type TicketEventRecord = {
+  id: number;
+  actor_id: string;
+  action: string;
+  occurred_at: string;
+  actor?: { display_name: string } | null;
+};
+
 export type TicketRecord = {
   id: string;
   number: number;
@@ -37,6 +54,8 @@ export type TicketRecord = {
   categories?: { name: string } | null;
   author?: { display_name: string } | null;
   assignee?: { display_name: string } | null;
+  comments?: TicketCommentRecord[];
+  ticket_events?: TicketEventRecord[];
 };
 
 export type CategoryRecord = {
