@@ -17,8 +17,9 @@ function logInvitationFailure(stage: "profile_provisioning" | "queue_assignment"
   });
 }
 
-function logUserListFailure(error: { code?: string; message?: string }) {
+function logUserListFailure(stage: "profiles" | "queue_access", error: { code?: string; message?: string }) {
   console.error("Supabase admin user list failed", {
+    stage,
     code: error.code ?? "",
     message: error.message?.slice(0, 200) ?? "No provider error returned",
   });
@@ -29,19 +30,32 @@ export async function GET(request: Request) {
     const viewer = await requireViewer();
     if (!canAdminister(viewer.profile.role)) throw new AppError(403, "FORBIDDEN", "Admin required");
     const supabase = createUserSupabaseClient(viewer.idToken);
-    const { data, error } = await supabase.from("profiles").select("id,display_name,email,role,state,created_at,specialist_category_access(category_id)").order("created_at", { ascending: false });
-    if (error) {
-      logUserListFailure(error);
+    const [{ data: profiles, error: profilesError }, { data: accessRows, error: accessError }] = await Promise.all([
+      supabase.from("profiles").select("id,display_name,email,role,state,created_at").order("created_at", { ascending: false }),
+      supabase.from("specialist_category_access").select("specialist_id,category_id"),
+    ]);
+    if (profilesError) {
+      logUserListFailure("profiles", profilesError);
       throw new AppError(500, "INTERNAL", "Profile query failed");
     }
-    return Response.json({ users: (data ?? []).map((profile) => {
-      const access = Array.isArray(profile.specialist_category_access) ? profile.specialist_category_access : [];
-      return {
+    if (accessError) {
+      logUserListFailure("queue_access", accessError);
+      throw new AppError(500, "INTERNAL", "Queue access query failed");
+    }
+
+    const categoryIdsBySpecialist = new Map<string, string[]>();
+    for (const access of accessRows ?? []) {
+      const categoryIds = categoryIdsBySpecialist.get(access.specialist_id) ?? [];
+      categoryIds.push(access.category_id);
+      categoryIdsBySpecialist.set(access.specialist_id, categoryIds);
+    }
+
+    return Response.json({
+      users: (profiles ?? []).map((profile) => ({
         ...profile,
-        category_ids: access.map((item) => item.category_id),
-        specialist_category_access: undefined,
-      };
-    }) });
+        category_ids: categoryIdsBySpecialist.get(profile.id) ?? [],
+      })),
+    });
   });
 }
 
