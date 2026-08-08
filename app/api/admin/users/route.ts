@@ -17,18 +17,31 @@ function logInvitationFailure(stage: "profile_provisioning" | "queue_assignment"
   });
 }
 
+function logUserListFailure(error: { code?: string; message?: string }) {
+  console.error("Supabase admin user list failed", {
+    code: error.code ?? "",
+    message: error.message?.slice(0, 200) ?? "No provider error returned",
+  });
+}
+
 export async function GET(request: Request) {
   return apiHandler(request, async () => {
     const viewer = await requireViewer();
     if (!canAdminister(viewer.profile.role)) throw new AppError(403, "FORBIDDEN", "Admin required");
     const supabase = createUserSupabaseClient(viewer.idToken);
     const { data, error } = await supabase.from("profiles").select("id,display_name,email,role,state,created_at,specialist_category_access(category_id)").order("created_at", { ascending: false });
-    if (error) throw new AppError(500, "INTERNAL", "Profile query failed");
-    return Response.json({ users: (data ?? []).map((profile) => ({
-      ...profile,
-      category_ids: profile.specialist_category_access.map((access) => access.category_id),
-      specialist_category_access: undefined,
-    })) });
+    if (error) {
+      logUserListFailure(error);
+      throw new AppError(500, "INTERNAL", "Profile query failed");
+    }
+    return Response.json({ users: (data ?? []).map((profile) => {
+      const access = Array.isArray(profile.specialist_category_access) ? profile.specialist_category_access : [];
+      return {
+        ...profile,
+        category_ids: access.map((item) => item.category_id),
+        specialist_category_access: undefined,
+      };
+    }) });
   });
 }
 
