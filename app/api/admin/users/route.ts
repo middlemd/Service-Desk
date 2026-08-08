@@ -9,6 +9,14 @@ import { inviteUserSchema, parseJson } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
+function logInvitationFailure(stage: "profile_provisioning" | "queue_assignment" | "audit", error: { code?: string; message?: string } | null) {
+  console.error("Supabase invitation operation failed", {
+    stage,
+    code: error?.code ?? "",
+    message: error?.message?.slice(0, 200) ?? "No provider error returned",
+  });
+}
+
 export async function GET(request: Request) {
   return apiHandler(request, async () => {
     const viewer = await requireViewer();
@@ -46,6 +54,7 @@ export async function POST(request: Request) {
       .select("id,display_name,email,role,state,created_at")
       .single();
     if (error || !profile) {
+      logInvitationFailure("profile_provisioning", error);
       await deleteAuth0User(authSubject).catch(() => undefined);
       throw new AppError(500, "INTERNAL", "Profile provisioning failed");
     }
@@ -53,6 +62,7 @@ export async function POST(request: Request) {
       const rows = payload.data.categoryIds.map((categoryId) => ({ specialist_id: profile.id, category_id: categoryId, granted_by: viewer.profile.id }));
       const { error: accessError } = await service.from("specialist_category_access").insert(rows);
       if (accessError) {
+        logInvitationFailure("queue_assignment", accessError);
         await service.from("profiles").delete().eq("id", profile.id);
         await deleteAuth0User(authSubject).catch(() => undefined);
         throw new AppError(500, "INTERNAL", "Queue assignment failed");
@@ -61,6 +71,7 @@ export async function POST(request: Request) {
     const userClient = createUserSupabaseClient(viewer.idToken);
     const { data: auditWritten, error: auditError } = await userClient.rpc("write_admin_audit", { p_action: "user.invited", p_object_type: "profile", p_object_id: profile.id, p_request_id: requestId });
     if (auditError || auditWritten !== true) {
+      logInvitationFailure("audit", auditError);
       await service.from("profiles").delete().eq("id", profile.id);
       await deleteAuth0User(authSubject).catch(() => undefined);
       throw new AppError(500, "INTERNAL", "Invitation audit failed");
