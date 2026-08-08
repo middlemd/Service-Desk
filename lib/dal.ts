@@ -22,7 +22,18 @@ export const requireViewer = cache(async (): Promise<Viewer> => {
     .eq("auth_subject", subject)
     .maybeSingle();
 
-  if (error || !data || data.state === "blocked") throw new AppError(403, "FORBIDDEN", "Profile unavailable");
+  if (error) {
+    console.error("Supabase profile lookup failed", {
+      code: error.code,
+      message: error.message.slice(0, 200),
+    });
+    throw new AppError(403, "FORBIDDEN", "Profile unavailable");
+  }
+  if (!data) {
+    console.error("Supabase profile lookup returned no accessible row");
+    throw new AppError(403, "FORBIDDEN", "Profile unavailable");
+  }
+  if (data.state === "blocked") throw new AppError(403, "FORBIDDEN", "Profile unavailable");
   if (data.state === "invited") {
     const { error: activationError } = await supabase.rpc("activate_own_profile");
     if (activationError) throw new AppError(403, "FORBIDDEN", "Profile activation failed");
